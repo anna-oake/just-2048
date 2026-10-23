@@ -22,8 +22,8 @@ final class GameCenter: NSObject, @MainActor GKGameCenterControllerDelegate {
     init(legacyBest: Int) {
         scores = HighScoreStore(legacyBest: legacyBest)
         super.init()
-        NotificationCenter.default.addObserver(self, selector: #selector(becameActive),
-                                               name: UIApplication.didBecomeActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(becameActive(_:)),
+                                               name: UIScene.didActivateNotification, object: nil)
     }
 
     func start(presenting controller: UIViewController) {
@@ -92,7 +92,8 @@ final class GameCenter: NSObject, @MainActor GKGameCenterControllerDelegate {
         if let error { NSLog("Game Center authentication: %@", error.localizedDescription) }
     }
 
-    @objc private func becameActive() {
+    @objc private func becameActive(_ notification: Notification) {
+        guard notification.object as? UIScene === presenter?.view.window?.windowScene else { return }
         guard let playerID, GKLocalPlayer.local.isAuthenticated,
               playerID == GKLocalPlayer.local.gamePlayerID else { return }
         retry?.cancel()
@@ -132,8 +133,8 @@ final class GameCenter: NSObject, @MainActor GKGameCenterControllerDelegate {
                     NSLog("Game Center score submission: %@", error.localizedDescription)
                     let retry = DispatchWorkItem { [weak self] in
                         self?.retry = nil
-                        guard UIApplication.shared.applicationState == .active else { return }
-                        self?.submitPendingScore()
+                        guard let self, self.presenter?.view.window?.windowScene?.activationState == .foregroundActive else { return }
+                        self.submitPendingScore()
                     }
                     self.retry = retry
                     DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: retry)

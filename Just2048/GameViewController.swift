@@ -31,6 +31,87 @@ private enum Squircle {
     }
 }
 
+private struct GameLayout {
+    let content: CGRect
+    let title: CGRect
+    let scores: CGRect
+    let board: CGRect
+    let privacy: CGRect
+    let restart: CGRect
+    let appearance: CGRect
+    let verticalScores: Bool
+
+    init(in safeArea: CGRect, verticalControls: Bool, controlsOnLeadingEdge: Bool, edgeToEdge: Bool = false, largeControls: Bool = false, horizontalCenter: CGFloat? = nil, compactLandscape: Bool = false) {
+        let available = safeArea.insetBy(dx: edgeToEdge ? 8 : min(24, safeArea.width * 0.06), dy: edgeToEdge ? 8 : 12)
+        let buttonSide: CGFloat = compactLandscape ? 56 : (largeControls ? 64 : 50)
+        if available.width > available.height {
+            let columnWidth = compactLandscape ? 96 : min(120, max(96, available.width - available.height - buttonSide - 32))
+            let gap: CGFloat = compactLandscape ? 28 : 16
+            let railWidth = buttonSide + gap
+            let preferredCenter = horizontalCenter ?? available.midX
+            let center = preferredCenter > available.minX && preferredCenter < available.maxX ? preferredCenter : available.midX
+            let side = max(0, min(available.height,
+                                  2 * (center - available.minX - columnWidth - gap),
+                                  2 * (available.maxX - center - railWidth)))
+            content = CGRect(x: available.minX, y: available.midY - side / 2, width: available.width, height: side)
+            board = CGRect(x: center - available.minX - side / 2, y: 0, width: side, height: side)
+            let headerY = compactLandscape ? max(0, (side - 208) / 2) : 0
+            let columnX = board.minX - gap - columnWidth
+            title = CGRect(x: columnX, y: headerY, width: columnWidth, height: 64)
+            scores = CGRect(x: columnX, y: headerY + 80, width: columnWidth, height: 128)
+            let x = board.maxX + gap
+            let spacing = min(buttonSide + gap, (side - buttonSide) / 2)
+            let controlsY = compactLandscape ? side / 2 - spacing - buttonSide / 2 : 0
+            privacy = CGRect(x: x, y: controlsY, width: buttonSide, height: buttonSide)
+            restart = CGRect(x: x, y: controlsY + spacing, width: buttonSide, height: buttonSide)
+            appearance = CGRect(x: x, y: controlsY + spacing * 2, width: buttonSide, height: buttonSide)
+            verticalScores = true
+            return
+        }
+        verticalScores = false
+        let rail = !edgeToEdge && ((verticalControls && available.width >= 230) || available.width > available.height || min(available.width, available.height - 172) < 150)
+        let railWidth: CGFloat = rail ? buttonSide + 28 : 0
+        let headerHeight: CGFloat = edgeToEdge ? 78 : (largeControls ? 102 : 86)
+        let buttonGap: CGFloat = largeControls ? 40 : 28
+        let footerHeight: CGFloat = rail ? 0 : buttonSide + buttonGap + (edgeToEdge ? 0 : 8)
+        let side = max(0, min(largeControls ? 576 : 600, available.width - railWidth, available.height - headerHeight - footerHeight))
+        let width = side + railWidth
+        let height = side + headerHeight + footerHeight
+        let originY = max(available.minY, min(available.maxY - height, safeArea.midY - height / 2 - 18))
+        content = CGRect(x: available.midX - width / 2, y: originY, width: width, height: height)
+        let boardX: CGFloat = rail && controlsOnLeadingEdge ? railWidth : 0
+        board = CGRect(x: boardX, y: headerHeight, width: side, height: side)
+        let scoresWidth = side * 0.51
+        title = CGRect(x: boardX, y: 0, width: max(0, side - scoresWidth - 12), height: edgeToEdge ? 50 : 64)
+        scores = CGRect(x: board.maxX - scoresWidth, y: edgeToEdge ? 0 : 3, width: scoresWidth, height: edgeToEdge ? 52 : 58)
+        if rail {
+            let x: CGFloat = controlsOnLeadingEdge ? 0 : board.maxX + 28
+            let spacing = min(buttonSide + 28, (height - buttonSide) / 2)
+            let centerY = max(spacing + buttonSide / 2, min(board.midY, height - spacing - buttonSide / 2))
+            privacy = CGRect(x: x, y: centerY - spacing - buttonSide / 2, width: buttonSide, height: buttonSide)
+            restart = CGRect(x: x, y: centerY - buttonSide / 2, width: buttonSide, height: buttonSide)
+            appearance = CGRect(x: x, y: centerY + spacing - buttonSide / 2, width: buttonSide, height: buttonSide)
+        } else {
+            let y = board.maxY + buttonGap
+            privacy = CGRect(x: board.minX, y: y, width: buttonSide, height: buttonSide)
+            restart = CGRect(x: board.midX - buttonSide / 2, y: y, width: buttonSide, height: buttonSide)
+            appearance = CGRect(x: board.maxX - buttonSide, y: y, width: buttonSide, height: buttonSide)
+        }
+    }
+
+    static func excluding(_ obstruction: CGRect, from area: CGRect) -> [CGRect] {
+        let intersection = area.intersection(obstruction)
+        guard !intersection.isNull, !intersection.isEmpty else { return [area] }
+        let candidates = [
+            CGRect(x: area.minX, y: area.minY, width: intersection.minX - area.minX, height: area.height),
+            CGRect(x: intersection.maxX, y: area.minY, width: area.maxX - intersection.maxX, height: area.height),
+            CGRect(x: area.minX, y: area.minY, width: area.width, height: intersection.minY - area.minY),
+            CGRect(x: area.minX, y: intersection.maxY, width: area.width, height: area.maxY - intersection.maxY)
+        ]
+        return candidates.filter { $0.width >= 160 && $0.height >= 180 }
+    }
+}
+
 private extension UIColor {
     convenience init(hex: UInt32, alpha: CGFloat = 1) {
         self.init(red: CGFloat((hex >> 16) & 255) / 255, green: CGFloat((hex >> 8) & 255) / 255, blue: CGFloat(hex & 255) / 255, alpha: alpha)
@@ -50,6 +131,11 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
     private var game: Game
     private lazy var gameCenter = GameCenter(legacyBest: game.best)
     private let content = UIView()
+    private let titleLabel = UILabel()
+    private var scoresView: UIStackView!
+    private var boardGeometry = CGRect.zero
+    private var needsOverlayLayout = false
+    private var panGesture: UIPanGestureRecognizer?
     private let board = UIView()
     private let scoreLabel = UILabel()
     private let bestLabel = UILabel()
@@ -89,24 +175,19 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (controller: GameViewController, _) in
+            if #available(iOS 27.1, *) { controller.setNeedsUpdateOfVerticalBarConfiguration() }
+        }
         view.backgroundColor = .paper
         view.addSubview(content)
-        content.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
-            content.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
-            content.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor, constant: -18),
-            content.heightAnchor.constraint(equalTo: content.widthAnchor, constant: 172)
-        ])
-        let title = UILabel()
+        let title = titleLabel
         title.text = "2048"
         title.font = .systemFont(ofSize: 48, weight: .bold)
         title.textColor = .ink
         title.adjustsFontSizeToFitWidth = true
-        title.minimumScaleFactor = 0.7
+        title.minimumScaleFactor = 0.3
         title.accessibilityTraits = .header
         content.addSubview(title)
-        title.translatesAutoresizingMaskIntoConstraints = false
         let bestCard = scoreCard("BEST", value: bestLabel)
         bestCard.isUserInteractionEnabled = false
         bestButton.addSubview(bestCard)
@@ -120,15 +201,15 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
         bestButton.accessibilityHint = "Opens the Game Center leaderboard"
         bestButton.addTarget(self, action: #selector(showGameCenter), for: .touchUpInside)
         let scores = UIStackView(arrangedSubviews: [scoreCard("SCORE", value: scoreLabel), bestButton])
+        scoresView = scores
         scores.spacing = 8
         scores.distribution = .fillEqually
         content.addSubview(scores)
-        scores.translatesAutoresizingMaskIntoConstraints = false
+        scores.translatesAutoresizingMaskIntoConstraints = true
         board.backgroundColor = .board
         board.layer.cornerRadius = 12
         board.clipsToBounds = true
         content.addSubview(board)
-        board.translatesAutoresizingMaskIntoConstraints = false
         for _ in 0..<16 {
             let cell = UIView()
             cell.backgroundColor = .emptyCell
@@ -143,7 +224,6 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
         restart.accessibilityLabel = "Restart game"
         restart.addTarget(self, action: #selector(confirmRestart), for: .touchUpInside)
         content.addSubview(restart)
-        restart.translatesAutoresizingMaskIntoConstraints = false
         privacy.setImage(UIImage(systemName: "info.circle", withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)), for: .normal)
         privacy.tintColor = .ink
         privacy.backgroundColor = .controlFill
@@ -151,7 +231,6 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
         privacy.accessibilityLabel = "Privacy & Support"
         privacy.addTarget(self, action: #selector(showPrivacy), for: .touchUpInside)
         content.addSubview(privacy)
-        privacy.translatesAutoresizingMaskIntoConstraints = false
         appearanceButton.tintColor = .ink
         appearanceButton.backgroundColor = .controlFill
         appearanceButton.layer.cornerRadius = 25
@@ -159,35 +238,9 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
         appearanceButton.accessibilityHint = "Cycles between system, dark and light appearance"
         appearanceButton.addTarget(self, action: #selector(cycleAppearance), for: .touchUpInside)
         content.addSubview(appearanceButton)
-        appearanceButton.translatesAutoresizingMaskIntoConstraints = false
         updateAppearanceButton()
-        NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            title.topAnchor.constraint(equalTo: content.topAnchor),
-            title.heightAnchor.constraint(equalToConstant: 64),
-            title.trailingAnchor.constraint(lessThanOrEqualTo: scores.leadingAnchor, constant: -12),
-            scores.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            scores.centerYAnchor.constraint(equalTo: title.centerYAnchor),
-            scores.widthAnchor.constraint(equalTo: content.widthAnchor, multiplier: 0.51),
-            scores.heightAnchor.constraint(equalToConstant: 58),
-            board.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 22),
-            board.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            board.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            board.heightAnchor.constraint(equalTo: board.widthAnchor),
-            restart.topAnchor.constraint(equalTo: board.bottomAnchor, constant: 28),
-            restart.centerXAnchor.constraint(equalTo: content.centerXAnchor),
-            restart.widthAnchor.constraint(equalToConstant: 50),
-            restart.heightAnchor.constraint(equalToConstant: 50),
-            privacy.centerYAnchor.constraint(equalTo: restart.centerYAnchor),
-            privacy.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            privacy.widthAnchor.constraint(equalToConstant: 50),
-            privacy.heightAnchor.constraint(equalToConstant: 50),
-            appearanceButton.centerYAnchor.constraint(equalTo: restart.centerYAnchor),
-            appearanceButton.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            appearanceButton.widthAnchor.constraint(equalToConstant: 50),
-            appearanceButton.heightAnchor.constraint(equalToConstant: 50)
-        ])
         let pan = UIPanGestureRecognizer(target: self, action: #selector(panned(_:)))
+        panGesture = pan
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
         view.addGestureRecognizer(pan)
@@ -195,8 +248,8 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
             board.accessibilityCustomActions = (board.accessibilityCustomActions ?? []) + [UIAccessibilityCustomAction(name: name) { [weak self] _ in self?.move(direction); return true }]
         }
         board.isAccessibilityElement = true
-        NotificationCenter.default.addObserver(self, selector: #selector(save), name: UIApplication.didEnterBackgroundNotification, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(interrupted), name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(sceneEnteredBackground(_:)), name: UIScene.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(sceneWillDeactivate(_:)), name: UIScene.willDeactivateNotification, object: nil)
         gameCenter.onBestScoreChanged = { [weak self] best in self?.updateBestScore(best) }
         render()
         save()
@@ -232,8 +285,126 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
         bestButton.accessibilityLabel = "Best score, \(best)"
     }
 
+    @available(iOS 27.1, *)
+    override var preferredVerticalBarBehavior: UIVerticalBarBehavior {
+        traitCollection.horizontalSizeClass == .compact ? .disabled : .automatic
+    }
+
+    override func present(_ viewControllerToPresent: UIViewController, animated flag: Bool, completion: (() -> Void)? = nil) {
+        if #available(iOS 27.1, *), preferredVerticalBarBehavior == .disabled {
+            definesPresentationContext = true
+            viewControllerToPresent.modalPresentationStyle = .overCurrentContext
+        }
+        super.present(viewControllerToPresent, animated: flag, completion: completion)
+    }
+
+    override func viewWillLayoutSubviews() {
+        super.viewWillLayoutSubviews()
+        updateRestartPresentation()
+        var verticalControls = false
+        var controlsOnLeadingEdge = false
+        var edgeToEdge = false
+        if #available(iOS 27.1, *) {
+            let edge = traitCollection.verticalBarEdge
+            verticalControls = edge != .unspecified
+            edgeToEdge = traitCollection.horizontalSizeClass == .compact && view.bounds.width <= view.bounds.height
+            controlsOnLeadingEdge = (edge == .leading && view.effectiveUserInterfaceLayoutDirection == .leftToRight) ||
+                (edge == .trailing && view.effectiveUserInterfaceLayoutDirection == .rightToLeft)
+        }
+        let landscape = view.bounds.width > view.bounds.height
+        let compactLandscape = landscape && traitCollection.horizontalSizeClass == .compact
+        let largeControls = traitCollection.horizontalSizeClass == .regular || landscape
+        var safeInsets = view.safeAreaInsets
+        if landscape {
+            let verticalInset = compactLandscape ? min(safeInsets.bottom, 24) : max(safeInsets.top, safeInsets.bottom)
+            safeInsets.top = verticalInset
+            safeInsets.bottom = verticalInset
+        }
+        var regions = [view.bounds.inset(by: safeInsets)]
+        if #available(iOS 27.1, *) {
+            for reserved in view.reservedRegions(kind: .division) {
+                regions = regions.flatMap { GameLayout.excluding(reserved.frame, from: $0) }
+            }
+            for reserved in view.reservedRegions(kind: .occlusion) {
+                regions = regions.flatMap { region in
+                    if compactLandscape {
+                        let layout = GameLayout(in: region, verticalControls: verticalControls,
+                                                controlsOnLeadingEdge: controlsOnLeadingEdge, largeControls: largeControls,
+                                                horizontalCenter: view.bounds.midX, compactLandscape: true)
+                        let frames = [layout.board, layout.title, layout.scores, layout.privacy, layout.restart, layout.appearance]
+                        if !frames.contains(where: { $0.offsetBy(dx: layout.content.minX, dy: layout.content.minY).intersects(reserved.frame) }) {
+                            return [region]
+                        }
+                    }
+                    return GameLayout.excluding(reserved.frame, from: region)
+                }
+            }
+        }
+        let layouts = regions.map {
+            GameLayout(in: $0, verticalControls: verticalControls, controlsOnLeadingEdge: controlsOnLeadingEdge,
+                       edgeToEdge: edgeToEdge, largeControls: largeControls, horizontalCenter: view.bounds.midX,
+                       compactLandscape: compactLandscape)
+        }
+        guard let layout = layouts.filter({ $0.board.width >= 160 }).max(by: { $0.board.width < $1.board.width }), layout.board.width > 0 else {
+            stopInteractionForResize()
+            content.isHidden = true
+            return
+        }
+        content.isHidden = false
+        let nextGeometry = layout.board.offsetBy(dx: layout.content.minX, dy: layout.content.minY)
+        if boardGeometry != nextGeometry {
+            stopInteractionForResize()
+            boardGeometry = nextGeometry
+            needsOverlayLayout = true
+        }
+        content.frame = layout.content
+        titleLabel.frame = layout.title
+        scoresView.axis = layout.verticalScores ? .vertical : .horizontal
+        scoresView.frame = layout.scores
+        board.frame = layout.board
+        privacy.frame = layout.privacy
+        restart.frame = layout.restart
+        appearanceButton.frame = layout.appearance
+        let symbolSize: CGFloat = compactLandscape ? 24 : (largeControls ? 28 : 22)
+        for (button, symbol) in [(privacy, "info.circle"), (restart, "arrow.counterclockwise"), (appearanceButton, appearance.symbol)] {
+            button.layer.cornerRadius = button.bounds.width / 2
+            button.setImage(UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: symbolSize, weight: .semibold)), for: .normal)
+        }
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        stopInteractionForResize()
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: { [weak self] _ in
+            self?.view.setNeedsLayout()
+            self?.view.layoutIfNeeded()
+        })
+    }
+
+    private func stopInteractionForResize() {
+        pendingDirections.removeAll()
+        if let panGesture, panGesture.state == .began || panGesture.state == .changed {
+            panGesture.isEnabled = false
+            panGesture.isEnabled = true
+        }
+        interrupted()
+    }
+
+    @objc private func sceneWillDeactivate(_ notification: Notification) {
+        guard notification.object as? UIScene === view.window?.windowScene else { return }
+        pendingDirections.removeAll()
+        interrupted()
+    }
+
+    @objc private func sceneEnteredBackground(_ notification: Notification) {
+        guard notification.object as? UIScene === view.window?.windowScene else { return }
+        save()
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        scoresView.layoutIfNeeded()
+        bestButton.layoutIfNeeded()
         for (index, cell) in backgrounds.enumerated() { cell.frame = frame(for: index) }
         Squircle.apply(to: board, radius: 28)
         backgrounds.forEach { Squircle.apply(to: $0, radius: tileSide * 0.24) }
@@ -244,6 +415,10 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
                 tileViews[tile.id]?.resize(to: tileSide)
             }
         }
+        if needsOverlayLayout {
+            needsOverlayLayout = false
+            if overlay != nil { updateOverlay(animated: false) }
+        }
         overlay?.frame = board.bounds
     }
 
@@ -253,6 +428,8 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
         label.textColor = UIColor(hex: 0xEEE4DA)
         label.font = .systemFont(ofSize: 10, weight: .bold)
         label.textAlignment = .center
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.6
         value.font = .monospacedDigitSystemFont(ofSize: 21, weight: .bold)
         value.textColor = .white
         value.textAlignment = .center
@@ -300,7 +477,7 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard overlay == nil, presentedViewController == nil else { return false }
+        guard !content.isHidden, overlay == nil, presentedViewController == nil else { return false }
         var target = touch.view
         while let current = target {
             if current is UIControl { return false }
@@ -452,7 +629,7 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
     private func settle(to distance: CGFloat, duration: TimeInterval, completion: @escaping () -> Void) {
         settling = true
         preview?.animation.animate(to: distance, duration: UIAccessibility.isReduceMotionEnabled ? 0 : duration,
-                                   maximumFramesPerSecond: view.window?.screen.maximumFramesPerSecond ?? 60,
+                                   maximumFramesPerSecond: view.window?.windowScene?.screen.maximumFramesPerSecond ?? 60,
                                    completion: completion)
     }
 
@@ -480,7 +657,7 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
         }
     }
 
-    private func updateOverlay() {
+    private func updateOverlay(animated: Bool = true) {
         overlay?.removeFromSuperview(); overlay = nil
         board.isAccessibilityElement = true
         guard game.needsWinPrompt || game.isOver else { return }
@@ -492,7 +669,9 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
         overlay = panel
         let title = UILabel()
         title.text = game.needsWinPrompt ? "2048!" : "Game over"
-        title.font = .systemFont(ofSize: 38, weight: .bold)
+        title.font = .systemFont(ofSize: min(38, board.bounds.width / 6), weight: .bold)
+        title.adjustsFontSizeToFitWidth = true
+        title.minimumScaleFactor = 0.5
         title.textColor = .ink
         title.textAlignment = .center
         let action = UIButton(type: .system)
@@ -501,7 +680,8 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
         config.baseBackgroundColor = UIColor(hex: 0x8F7A66)
         config.baseForegroundColor = UIColor(hex: 0xF9F6F2)
         config.cornerStyle = .medium
-        config.contentInsets = NSDirectionalEdgeInsets(top: 14, leading: 24, bottom: 14, trailing: 24)
+        let padding = min(24, board.bounds.width * 0.08)
+        config.contentInsets = NSDirectionalEdgeInsets(top: 14, leading: padding, bottom: 14, trailing: padding)
         action.configuration = config
         action.addTarget(self, action: #selector(outcomeAction), for: .touchUpInside)
         let stack = UIStackView(arrangedSubviews: [title, action])
@@ -510,17 +690,41 @@ final class GameViewController: UIViewController, UIGestureRecognizerDelegate {
         stack.spacing = 20
         panel.addSubview(stack)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo: panel.centerXAnchor), stack.centerYAnchor.constraint(equalTo: panel.centerYAnchor)])
-        if !UIAccessibility.isReduceMotionEnabled {
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: panel.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: panel.centerYAnchor),
+            stack.widthAnchor.constraint(lessThanOrEqualTo: panel.widthAnchor, constant: -16)
+        ])
+        if animated && !UIAccessibility.isReduceMotionEnabled {
             panel.alpha = 0
             UIView.animate(withDuration: 0.22, delay: 0.14, options: [.allowUserInteraction, .curveEaseOut]) { panel.alpha = 1 }
         }
-        UIAccessibility.post(notification: .screenChanged, argument: title)
+        if animated { UIAccessibility.post(notification: .screenChanged, argument: title) }
     }
     @objc private func outcomeAction() {
         if game.needsWinPrompt { game.continued = true; save(); render() }
         else { newGame() }
     }
+    private func updateRestartPresentation() {
+        var useMenu = false
+        if #available(iOS 27.1, *) { useMenu = preferredVerticalBarBehavior == .disabled }
+        guard restart.showsMenuAsPrimaryAction != useMenu else { return }
+        restart.showsMenuAsPrimaryAction = useMenu
+        if useMenu {
+            restart.removeTarget(self, action: #selector(confirmRestart), for: .touchUpInside)
+            restart.menu = UIMenu(title: "Restart game?", children: [
+                UIAction(title: "Restart", attributes: .destructive) { [weak self] _ in
+                    guard let self, !self.moving else { return }
+                    self.newGame()
+                },
+                UIAction(title: "Cancel") { _ in }
+            ])
+        } else {
+            restart.menu = nil
+            restart.addTarget(self, action: #selector(confirmRestart), for: .touchUpInside)
+        }
+    }
+
     @objc private func confirmRestart() {
         guard !moving else { return }
         let alert = UIAlertController(title: "Restart game?", message: nil, preferredStyle: .alert)
